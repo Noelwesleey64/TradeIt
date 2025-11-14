@@ -19,6 +19,7 @@ RUN install-php-extensions \
     opcache \
     pdo \
     pdo_mysql \
+    pdo_pgsql \
     redis
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
@@ -29,8 +30,8 @@ WORKDIR /var/www/html
 COPY . .
 
 # Start with base PHP config, then add extensions.
-COPY ./.docker/php/php.ini /usr/local/etc/php/
-COPY ./.docker/etc/supervisor.d/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY ./docker/etc/supervisor.d/php/php.ini /usr/local/etc/php/
+COPY ./docker/etc/supervisor.d/supervisor.conf /etc/supervisor/conf.d/supervisord.conf
 
 # Install PHP extensions
 RUN pecl install xdebug

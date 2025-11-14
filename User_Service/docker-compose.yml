@@ -1,52 +1,62 @@
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: 6
+
 services:
-    web:
+    tradeit.user_service.app:
         build:
             context: ./
-            dockerfile: ./.docker/php/Dockerfile.local
+            dockerfile: ./docker/etc/supervisor.d/php/Dockerfile.local
+        image: tradeit
+        container_name: tradeit.user_service.app
+        env_file:
+            - ./.env
         ports:
-            - ${APP_PORT:-8000}:8000
+            - ${APP_PORT:-8000}:80
             - ${VITE_PORT:-5173}:${VITE_PORT:-5173}
         volumes:
             - ./:${WORKDIR}
             - ./vendor/:${WORKDIR}/vendor
         networks:
-            - lara11-beta
+            - tradeit
         depends_on:
-            - mysql
-            - redis
-            - minio
-            - mailpit
-    mysql:
-        image: mysql/mysql-server:${MYSQL_VERSION:-8.0}
+            - tradeit.user_service.pgsql
+            - tradeit.user_service.redis
+            - tradeit.user_service.minio
+
+    tradeit.user_service.pgsql:
+        image: 'postgres:${POSTGRES_VERSION:-17}-alpine'
+        container_name: tradeit.user_service.db
+        env_file:
+            - ./.env
         ports:
-            - ${FORWARD_DB_PORT:-3306}:3306
+            - ${FORWARD_DB_PORT:-5432}:5432
         environment:
-            MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-            MYSQL_ROOT_HOST: "%"
-            MYSQL_DATABASE: ${DB_DATABASE}
-            MYSQL_USER: ${DB_USERNAME}
-            MYSQL_PASSWORD: ${DB_PASSWORD}
-            MYSQL_ALLOW_EMPTY_PASSWORD: 1
+            POSTGRES_DB: '${DB_DATABASE}'
+            POSTGRES_USER: '${DB_USERNAME}'
+            POSTGRES_PASSWORD: '${DB_PASSWORD}'
         volumes:
-            - ${DB_VOLUME_LOCAL:-./database/mysql-test-data}:/var/lib/mysql
+            - ${DB_VOLUME_LOCAL:-./database/postgres-data}:/var/lib/postgresql/data
         networks:
-            - lara11-beta
+            - tradeit
+        logging: *default-logging
         healthcheck:
-            test:
-                - CMD
-                - mysqladmin
-                - ping
-                - -p${DB_PASSWORD}
+            test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME} -d ${DB_DATABASE}"]
             retries: 3
             timeout: 5s
-    redis:
+        restart: unless-stopped
+    tradeit.user_service.redis:
+        container_name: tradeit.user_service.redis
         image: redis:alpine
         ports:
             - ${FORWARD_REDIS_PORT:-6379}:6379
         volumes:
             - ${REDIS_VOLUME_LOCAL:-./database/redis-data}:/data
         networks:
-            - lara11-beta
+            - tradeit
+        logging: *default-logging
         healthcheck:
             test:
                 - CMD
@@ -54,7 +64,8 @@ services:
                 - ping
             retries: 3
             timeout: 5s
-    minio:
+    tradeit.user_service.minio:
+        container_name: tradeit.user_service.minio
         image: minio/minio:latest
         ports:
             - ${FORWARD_MINIO_PORT:-9000}:9000
@@ -65,8 +76,9 @@ services:
         volumes:
             - ${MINIO_VOLUME_LOCAL:-./storage/minio-data}:/data
         networks:
-            - lara11-beta
+            - tradeit
         command: minio server /data/minio --console-address ":${FORWARD_MINIO_CONSOLE_PORT}"
+        logging: *default-logging
         healthcheck:
             test:
                 - CMD
@@ -75,15 +87,26 @@ services:
                 - http://localhost:${FORWARD_MINIO_PORT}/minio/health/live
             retries: 3
             timeout: 5s
-    mailpit:
-        image: axllent/mailpit:latest
-        ports:
-            - ${FORWARD_MAILPIT_PORT:-1025}:1025
-            - ${FORWARD_MAILPIT_DASHBOARD_PORT:-8025}:8025
+  
+    tradeit.user_service.horizon:
+        image: tradeit
+        container_name: tradeit.user_service.horizon
+        env_file:
+            - ./.env
+        command: php /var/www/html/artisan horizon
+        working_dir: ${WORKDIR}
         volumes:
-            - ${MP_VOLUME_LOCAL:-./storage/mail-data}:/data
+            - ./:${WORKDIR}
+            - ./vendor/:${WORKDIR}/vendor
+        environment:
+            - QUEUE_CONNECTION=redis
+        depends_on:
+            - tradeit.user_service.redis
+            - tradeit.user_service.pgsql
         networks:
-            - lara11-beta
+            - tradeit
+        restart: unless-stopped
+        logging: *default-logging
 networks:
-    lara11-beta:
+    tradeit:
         driver: bridge

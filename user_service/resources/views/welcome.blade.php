@@ -79,7 +79,7 @@
 <body>
         <div class="container">
         <span class="status">✓ Online</span>
-        <h1>TradeIt test late boomers</h1>
+        <h1>TradeIt</h1>
        
         
         <div class="info">

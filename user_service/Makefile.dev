@@ -1,0 +1,106 @@
+SHELL = /bin/bash
+# Dev-specific Makefile
+# Use: make -f Makefile.dev <target>
+
+# Compose args for dev
+DC_RUN_ARGS = --env-file ./.env -f compose.yaml
+
+HOST_UID = $(shell if [ $$(id -u) -eq 0 ] && [ $$(id -g) -eq 0 ]; then echo 1000; else id -u; fi)
+HOST_GID = $(shell if [ $$(id -u) -eq 0 ] && [ $$(id -g) -eq 0 ]; then echo 1000; else id -g; fi)
+
+DEV_APP_SERVICE = tradeit.user_service.app
+DEV_PGSQL_SERVICE = tradeit.user_service.pgsql
+DEV_REDIS_SERVICE = tradeit.user_service.pgsql.redis
+DEV_MINIO_SERVICE = tradeit.user_service.pgsql.minio
+DEV_MAILPIT_SERVICE = tradeit.user_service.pgsql.mailpit
+DEV_HORIZON_SERVICE = tradeit.user_service.pgsql.horizon
+DEV_SCHEDULER_SERVICE = tradeit.user_service.pgsql.scheduler
+DEV_WORKER_SERVICE = tradeit.user_service.pgsql.worker
+DEV_REVERB_SERVICE = tradeit.user_service.reverb
+
+.PHONY: help up down build update logs logs:app logs:horizon shell app:exec init migrate seed horizon scheduler worker reverb ps build:all
+
+help: ## Show this help
+	@printf "\033[33m%s:\033[0m\n" 'Dev commands'
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z0-9_.-]+:.*?## / {printf "  \033[32m%-24s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+up: ## Start dev containers
+	HOST_UID=${HOST_UID} HOST_GID=${HOST_GID} docker compose ${DC_RUN_ARGS} up -d --remove-orphans
+
+down: ## Stop and remove dev containers and network
+	docker compose ${DC_RUN_ARGS} down
+
+build: ## Build dev images
+	HOST_UID=${HOST_UID} HOST_GID=${HOST_GID} docker compose ${DC_RUN_ARGS} build
+
+build:all: build ## Alias to build (for compatibility)
+
+update: ## Update running containers without dependents
+	HOST_UID=${HOST_UID} HOST_GID=${HOST_GID} docker compose ${DC_RUN_ARGS} up -d --no-deps --build --remove-orphans
+
+ps: ## Containers status
+	docker compose ${DC_RUN_ARGS} ps
+
+logs: ## Tail all dev container logs
+	docker compose ${DC_RUN_ARGS} logs -f
+
+logs:app: ## Tail app container logs
+	docker compose ${DC_RUN_ARGS} logs -f ${DEV_APP_SERVICE}
+
+logs:horizon: ## Tail horizon container logs
+	docker compose ${DC_RUN_ARGS} logs -f ${DEV_HORIZON_SERVICE}
+
+shell: ## Start shell into app container (interactive)
+	docker compose ${DC_RUN_ARGS} exec ${DEV_APP_SERVICE} sh
+
+app:exec: ## Run an interactive command in the app container: make app:exec command="php artisan migrate"
+	docker compose ${DC_RUN_ARGS} exec ${DEV_APP_SERVICE} sh -lc "$(command)"
+
+init: ## Initialize dev environment: up, composer/npm, keygen, migrate. Optionally run migrations with RUN_MIGRATIONS=true
+	@echo "Starting dev environment..."
+	HOST_UID=${HOST_UID} HOST_GID=${HOST_GID} docker compose ${DC_RUN_ARGS} up -d --remove-orphans
+	# Ensure the app container is reachable
+	@printf "Waiting for app container to start..."
+	until docker compose ${DC_RUN_ARGS} ps | grep "${DEV_APP_SERVICE}" | grep -q "Up"; do printf "."; sleep 1; done; echo " done"
+	# Composer and NPM
+	docker compose ${DC_RUN_ARGS} exec ${DEV_APP_SERVICE} sh -lc "composer install --no-interaction --prefer-dist --optimize-autoloader || true"
+	docker compose ${DC_RUN_ARGS} exec ${DEV_APP_SERVICE} sh -lc "npm ci || npm install || true"
+	# Artisan tasks
+	docker compose ${DC_RUN_ARGS} exec ${DEV_APP_SERVICE} sh -lc "php artisan key:generate || true"
+	# Optional migrations
+	if [ "${RUN_MIGRATIONS}" = "true" ]; then \
+	  docker compose ${DC_RUN_ARGS} exec ${DEV_APP_SERVICE} sh -lc "php artisan migrate --force --seed || true"; \
+	fi
+	@echo "Dev init completed"
+
+migrate: ## Run migrations in dev
+	docker compose ${DC_RUN_ARGS} exec ${DEV_APP_SERVICE} sh -lc "php artisan migrate --force"
+
+seed: ## Seed the database in dev
+	docker compose ${DC_RUN_ARGS} exec ${DEV_APP_SERVICE} sh -lc "php artisan db:seed --force"
+
+horizon: ## Start horizon service only
+	docker compose ${DC_RUN_ARGS} up -d ${DEV_HORIZON_SERVICE}
+
+scheduler: ## Start scheduler service only
+	docker compose ${DC_RUN_ARGS} up -d ${DEV_SCHEDULER_SERVICE}
+
+worker: ## Start worker service only
+	docker compose ${DC_RUN_ARGS} up -d ${DEV_WORKER_SERVICE}
+
+reverb: ## Start reverb service only
+	docker compose ${DC_RUN_ARGS} up -d ${DEV_REVERB_SERVICE}
+
+restart: ## Restart dev containers
+	HOST_UID=${HOST_UID} HOST_GID=${HOST_GID} docker compose ${DC_RUN_ARGS} restart
+
+clean: ## Remove all containers/images for this compose
+	docker compose ${DC_RUN_ARGS} down -v --remove-orphans
+
+# Convenience: run a composer or npm inside app container
+
+composer: ## Run composer inside app container: make composer full="install"
+	docker compose ${DC_RUN_ARGS} exec ${DEV_APP_SERVICE} sh -lc "composer $(full)"
+
+npm: ## Run npm/Yarn inside app container: make npm full="run build"
+	docker compose ${DC_RUN_ARGS} exec ${DEV_APP_SERVICE} sh -lc "npm $(full)"

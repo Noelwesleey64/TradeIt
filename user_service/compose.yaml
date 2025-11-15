@@ -1,0 +1,257 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 50m
+    max-file: "5"
+
+x-healthcheck: &default-healthcheck
+  interval: 2s
+  retries: 10
+  timeout: 3s
+
+services:
+  tradeit.user_service.app:
+    build:
+      context: .
+      dockerfile: FrankenPHP.Dockerfile
+      cache_from:
+        - tradeit_user_service/laravel-app:dev
+      args:
+        USER_ID: ${HOST_UID:-1000}
+        GROUP_ID: ${HOST_GID:-1000}
+    image: tradeit_user_service/laravel-app:dev
+    container_name: tradeit_user_service_app
+    user: ${HOST_UID:-1000}:${HOST_GID:-1000}
+    depends_on:
+      tradeit.user_service.pgsql:
+        condition: service_healthy
+      tradeit.user_service.redis:
+        condition: service_started
+      tradeit.user_service.minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "true"
+      OCTANE_WATCH: "${OCTANE_WATCH:-true}"
+      CHOKIDAR_USEPOLLING: 'true'
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./:/var/www/html
+      - ./deployment/octane/FrankenPHP/supervisord.frankenphp.conf:/etc/supervisor/conf.d/supervisord.frankenphp.conf:ro
+    networks:
+      - tradeit_user_service_network
+    ports:
+      - "8000:8000"
+      - "5173:5173"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--max-time", "5", "http://localhost:8000/up"]
+      <<: *default-healthcheck
+    logging: *default-logging
+    restart: unless-stopped
+
+  tradeit.user_service.pgsql:
+    image: postgres:${POSTGRES_VERSION:-17}-alpine
+    container_name: tradeit_user_service_pgsql
+    environment:
+      POSTGRES_DB: ${DB_DATABASE:-app}
+      POSTGRES_USER: ${DB_USERNAME:-app}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+      PGPASSWORD: ${DB_PASSWORD:-secret}
+    ports:
+      - "5432:5432"
+    volumes:
+      - tradeit_user_service_stack-pgsql:/var/lib/postgresql/data
+    networks:
+      - tradeit_user_service_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-app} -d ${DB_DATABASE:-app}"]
+      <<: *default-healthcheck
+    logging: *default-logging
+    restart: unless-stopped
+
+  tradeit.user_service.redis:
+    image: redis:7-alpine
+    container_name: tradeit_user_service_redis
+    command: [
+      "redis-server",
+      "--save", "60", "1000"
+    ]
+    ports:
+      - "6379:6379"
+    volumes:
+      - tradeit_user_service_stack-redis:/data
+    networks:
+      - tradeit_user_service_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      <<: *default-healthcheck
+    logging: *default-logging
+    restart: unless-stopped
+
+  tradeit.user_service.minio:
+    image: minio/minio:latest
+    container_name: tradeit_user_service_minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-miniosecret}
+    command: minio server /data --console-address ":8900"
+    ports:
+      - "9000:9000"
+      - "8900:8900"
+    volumes:
+      - tradeit_user_service_stack-minio:/data
+    networks:
+      - tradeit_user_service_network
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      <<: *default-healthcheck
+    logging: *default-logging
+    restart: unless-stopped
+
+  tradeit.user_service.mailpit:
+    image: axllent/mailpit:latest
+    container_name: tradeit_user_service_mailpit
+    ports:
+      - '${FORWARD_MAILPIT_PORT:-1025}:1025'
+      - '${FORWARD_MAILPIT_DASHBOARD_PORT:-8025}:8025'
+    networks:
+      - tradeit_user_service_network
+    logging: *default-logging
+    restart: unless-stopped
+
+
+  tradeit.user_service.horizon:
+    build:
+      context: .
+      dockerfile: FrankenPHP.Dockerfile
+      cache_from:
+        - tradeit_user_service/laravel-app:dev
+      args:
+        USER_ID: ${HOST_UID:-1000}
+        GROUP_ID: ${HOST_GID:-1000}
+    image: tradeit_user_service/laravel-app:dev
+    container_name: tradeit_user_service_horizon
+    user: ${HOST_UID:-1000}:${HOST_GID:-1000}
+    depends_on:
+      tradeit.user_service.pgsql:
+        condition: service_healthy
+      tradeit.user_service.redis:
+        condition: service_started
+      tradeit.user_service.minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      CONTAINER_MODE: horizon
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./:/var/www/html
+    networks:
+      - tradeit_user_service_network
+    logging: *default-logging
+    restart: unless-stopped
+    labels:
+      traefik.enable: false
+
+  tradeit.user_service.scheduler:
+    build:
+      context: .
+      dockerfile: FrankenPHP.Dockerfile
+      cache_from:
+        - tradeit_user_service/laravel-app:dev
+      args:
+        USER_ID: ${HOST_UID:-1000}
+        GROUP_ID: ${HOST_GID:-1000}
+    image: tradeit_user_service/laravel-app:dev
+    container_name: tradeit_user_service_scheduler
+    user: ${HOST_UID:-1000}:${HOST_GID:-1000}
+    depends_on:
+      tradeit.user_service.pgsql:
+        condition: service_healthy
+      tradeit.user_service.redis:
+        condition: service_started
+      tradeit.user_service.minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      CONTAINER_MODE: scheduler
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./:/var/www/html
+    networks:
+      - tradeit_user_service_network
+    logging: *default-logging
+    restart: unless-stopped
+    labels:
+      traefik.enable: false
+
+  tradeit.user_service.reverb:
+    build:
+      context: .
+      dockerfile: FrankenPHP.Dockerfile
+      cache_from:
+        - tradeit_user_service/laravel-app:dev
+      args:
+        USER_ID: ${HOST_UID:-1000}
+        GROUP_ID: ${HOST_GID:-1000}
+    image: tradeit_user_service/laravel-app:dev
+    container_name: tradeit_user_service_reverb
+    user: ${HOST_UID:-1000}:${HOST_GID:-1000}
+    depends_on:
+      tradeit.user_service.pgsql:
+        condition: service_healthy
+      tradeit.user_service.redis:
+        condition: service_started
+      tradeit.user_service.minio:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      APP_ENV: local
+      CONTAINER_MODE: reverb
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./:/var/www/html
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--max-time", "5", "http://localhost:8080/up"]
+      <<: *default-healthcheck
+    networks:
+      - tradeit_user_service_network
+    logging: *default-logging
+    restart: unless-stopped
+
+volumes:
+  tradeit_user_service_stack-pgsql:
+  tradeit_user_service_stack-redis:
+  tradeit_user_service_stack-minio:
+
+networks:
+  tradeit_user_service_network:
+    driver: bridge

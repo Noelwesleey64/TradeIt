@@ -78,13 +78,13 @@
 </head>
 <body>
         <div class="container">
-        <span class="status">✓ Online yes brob</span>
-        <h1>TradeIt User Bitch gg I'm a vetements</h1>
+        <span class="status">✓ Online</span>
+        <h1>TradeIt test late boomers</h1>
        
         
         <div class="info">
             <div class="info-item">
-                <span class="info-label">Laravel Version</span>
+                <span class="info-label">Larel Version</span>
                 <span class="info-value">{{ app()->version() }}</span>
             </div>
             <div class="info-item">

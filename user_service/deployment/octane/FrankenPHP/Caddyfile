@@ -8,7 +8,11 @@
 	skip_install_trust
 
 	frankenphp {
-		worker "{$APP_PUBLIC_PATH}/frankenphp-worker.php" {$CADDY_SERVER_WORKER_COUNT}
+		worker {
+			file "{$APP_PUBLIC_PATH}/frankenphp-worker.php"
+			{$CADDY_SERVER_WORKER_COUNT}
+			{$CADDY_SERVER_WATCH_DIRECTIVES}
+		}
 	}
 
 	metrics {

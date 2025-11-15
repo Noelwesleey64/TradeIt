@@ -79,7 +79,7 @@
 <body>
         <div class="container">
         <span class="status">✓ Online yes brob</span>
-        <h1>TradeIt User Bitch gggg</h1>
+        <h1>TradeIt User Bitch gg I'm a vetements</h1>
        
         
         <div class="info">
